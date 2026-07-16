@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+
 from fastapi import Depends, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
@@ -16,6 +18,7 @@ from .services import (
     serialize_entry,
     update_entry,
 )
+from .test_support import reset_test_database
 
 
 Base.metadata.create_all(bind=engine)
@@ -25,6 +28,7 @@ with SessionLocal() as startup_session:
     startup_session.commit()
 
 app = FastAPI(title="Etymae API")
+TEST_MODE = os.environ.get("ETYMAE_TEST_MODE") == "1"
 
 app.add_middleware(
     CORSMiddleware,
@@ -91,3 +95,12 @@ def delete(entry_id: int, session: Session = Depends(get_session)) -> DeleteResp
     session.delete(entry)
     session.commit()
     return DeleteResponse(ok=True)
+
+
+@app.post("/api/test/reset")
+def reset_test_data(session: Session = Depends(get_session)) -> dict[str, bool]:
+    if not TEST_MODE:
+        raise HTTPException(status_code=404, detail="Not found")
+
+    reset_test_database(session)
+    return {"ok": True}

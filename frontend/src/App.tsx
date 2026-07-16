@@ -352,7 +352,7 @@ function CardNode({ data }: NodeProps<AppNode>) {
   }, [data]);
 
   return (
-    <article ref={cardRef} className="card flow-card">
+    <article ref={cardRef} className="card flow-card" data-testid={`entry-card-${data.entry.id}`}>
       <Handle type="target" position={targetPosition} className="flow-handle" />
       <Handle type="source" position={sourcePosition} className="flow-handle" />
 
@@ -394,6 +394,7 @@ function CardNode({ data }: NodeProps<AppNode>) {
               key={`${data.entry.id}-up-${link.id}`}
               type="button"
               className="link-pill"
+              data-testid={`upstream-link-${data.entry.id}-${link.id}`}
               onClick={(event) => {
                 event.stopPropagation();
                 data.onOpen(link.id);
@@ -403,7 +404,11 @@ function CardNode({ data }: NodeProps<AppNode>) {
             </button>
           ))}
           {data.entry.upstream_unresolved.map((link) => (
-            <span key={`${data.entry.id}-missing-${link.label}`} className="link-pill unresolved-link">
+            <span
+              key={`${data.entry.id}-missing-${link.label}`}
+              className="link-pill unresolved-link"
+              data-testid={`unresolved-upstream-${data.entry.id}-${link.label}`}
+            >
               {link.label}
             </span>
           ))}
@@ -419,6 +424,7 @@ function CardNode({ data }: NodeProps<AppNode>) {
               key={`${data.entry.id}-down-${link.id}`}
               type="button"
               className="link-pill"
+              data-testid={`downstream-link-${data.entry.id}-${link.id}`}
               onClick={(event) => {
                 event.stopPropagation();
                 data.onOpen(link.id);
@@ -520,6 +526,8 @@ function App() {
 
     return nextEdges;
   }, [cards]);
+
+  const canSubmit = formState.spelling.trim().length > 0 && !submitting;
 
   useEffect(() => {
     setNodes((current) => {
@@ -715,6 +723,7 @@ function App() {
                   key={item.id}
                   type="button"
                   className="search-result"
+                  data-testid={`search-result-${item.id}`}
                   onClick={() => handleSelectCard(item.id)}
                 >
                   <span>{item.spelling}</span>
@@ -853,8 +862,8 @@ function App() {
               </label>
 
               <div className="form-actions">
-                <button type="submit" className="primary-button" disabled={submitting}>
-                  {submitting ? '保存中...' : '保存'}
+                <button type="submit" className="primary-button" disabled={!canSubmit}>
+                  保存
                 </button>
               </div>
             </form>

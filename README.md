@@ -23,6 +23,8 @@ npm run dev
 
 打开 `http://localhost:22026`。
 
+测试：`npm run test:e2e`（可视化`npm run test:e2e:live`）
+
 ## 当前特性
 
 - 顶部搜索栏
