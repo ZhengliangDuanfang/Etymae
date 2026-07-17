@@ -58,6 +58,11 @@ type EntryPayload = {
   upstream_raw: string;
 };
 
+type CsvImportResponse = {
+  ok: boolean;
+  imported_count: number;
+};
+
 type IconButtonProps = {
   label: string;
   onClick: () => void;
@@ -113,6 +118,23 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
   }
 
   return response.json() as Promise<T>;
+}
+
+async function apiBlob(path: string, init?: RequestInit): Promise<Blob> {
+  const response = await fetch(path, init);
+
+  if (!response.ok) {
+    const contentType = response.headers.get('content-type') ?? '';
+    if (contentType.includes('application/json')) {
+      const payload = (await response.json()) as { detail?: string; message?: string };
+      throw new Error(payload.detail || payload.message || 'Request failed');
+    }
+
+    const message = await response.text();
+    throw new Error(message || 'Request failed');
+  }
+
+  return response.blob();
 }
 
 function IconButton({ label, onClick, danger = false, children }: IconButtonProps) {
@@ -458,11 +480,14 @@ function App() {
   const [formState, setFormState] = useState<EntryPayload>(EMPTY_FORM);
   const [formError, setFormError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [csvBusy, setCsvBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<EntryDetail | null>(null);
   const [nodeHeights, setNodeHeights] = useState<Record<number, number>>({});
   const [nodes, setNodes] = useState<AppNode[]>([]);
   const [handleLayout, setHandleLayout] = useState<'horizontal' | 'vertical'>('horizontal');
+  const importInputRef = useRef<HTMLInputElement | null>(null);
   const cardIdsRef = useRef<number[]>([]);
   const nextZIndexRef = useRef(1);
   const pendingZIndexesRef = useRef<Record<number, number>>({});
@@ -630,6 +655,22 @@ function App() {
     setModalOpen(true);
   }
 
+  function resetBoardState() {
+    setCardIds([]);
+    setCardsById({});
+    setNodes([]);
+    setNodeHeights({});
+    setDeleteTarget(null);
+    setResults([]);
+    setQuery('');
+    setModalOpen(false);
+    setEditingId(null);
+    setFormState(EMPTY_FORM);
+    setFormError(null);
+    nextZIndexRef.current = 1;
+    pendingZIndexesRef.current = {};
+  }
+
   function hideCard(id: number) {
     setCardIds((current) => current.filter((cardId) => cardId !== id));
     setNodes((current) => current.filter((node) => Number(node.id) !== id));
@@ -705,6 +746,68 @@ function App() {
     }
   }
 
+  async function handleExportCsv() {
+    setCsvBusy(true);
+    setError(null);
+    setNotice(null);
+
+    try {
+      const blob = await apiBlob('/api/entries/export.csv');
+      const url = window.URL.createObjectURL(blob);
+      const anchor = document.createElement('a');
+      anchor.href = url;
+      anchor.download = `etymae-entries-${new Date().toISOString().slice(0, 10)}.csv`;
+      document.body.append(anchor);
+      anchor.click();
+      anchor.remove();
+      window.URL.revokeObjectURL(url);
+      setNotice('CSV 已导出。');
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : 'Failed to export CSV');
+    } finally {
+      setCsvBusy(false);
+    }
+  }
+
+  function openImportPicker() {
+    if (csvBusy) {
+      return;
+    }
+    importInputRef.current?.click();
+  }
+
+  async function handleImportFile(event: React.ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) {
+      return;
+    }
+
+    const confirmed = window.confirm('导入会用 CSV 内容覆盖当前数据库，是否继续？');
+    if (!confirmed) {
+      return;
+    }
+
+    setCsvBusy(true);
+    setError(null);
+    setNotice(null);
+
+    try {
+      const csvText = await file.text();
+      const result = await api<CsvImportResponse>('/api/entries/import.csv', {
+        method: 'POST',
+        body: JSON.stringify({ csv_text: csvText }),
+      });
+
+      resetBoardState();
+      setNotice(`CSV 已导入，当前数据库共覆盖为 ${result.imported_count} 条词条。`);
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : 'Failed to import CSV');
+    } finally {
+      setCsvBusy(false);
+    }
+  }
+
   return (
     <div className="shell">
       <header className="topbar">
@@ -734,6 +837,19 @@ function App() {
           ) : null}
         </div>
         <div className="topbar-actions">
+          <input
+            ref={importInputRef}
+            type="file"
+            accept=".csv,text/csv"
+            className="visually-hidden"
+            onChange={handleImportFile}
+          />
+          <button type="button" className="text-button" onClick={handleExportCsv} disabled={csvBusy}>
+            导出 CSV
+          </button>
+          <button type="button" className="text-button" onClick={openImportPicker} disabled={csvBusy}>
+            导入覆盖
+          </button>
           <button
             type="button"
             className="text-button"
@@ -748,6 +864,16 @@ function App() {
       </header>
 
       {error ? <div className="error-banner">{error}</div> : null}
+      {notice ? (
+        <div className="success-banner" role="status">
+          <span>{notice}</span>
+          <button type="button" className="banner-dismiss" aria-label="关闭提示" onClick={() => setNotice(null)}>
+            <svg viewBox="0 0 16 16" aria-hidden="true">
+              <path d="M4 4l8 8M12 4 4 12" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+            </svg>
+          </button>
+        </div>
+      ) : null}
 
       {cards.length === 0 ? (
         <section className="empty-state">
@@ -857,7 +983,7 @@ function App() {
                     setFormError(null);
                     setFormState((current) => ({ ...current, upstream_raw: event.target.value }));
                   }}
-                  placeholder="按逗号分隔，可写词组，支持 spelling [语言]"
+                  placeholder="按逗号分隔，支持 spelling 或 spelling [语言] 格式"
                 />
               </label>
 

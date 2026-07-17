@@ -2,20 +2,23 @@ from __future__ import annotations
 
 import os
 
-from fastapi import Depends, FastAPI, HTTPException, Query
+from fastapi import Depends, FastAPI, HTTPException, Query, Response
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 
 from .database import Base, SessionLocal, engine, get_session
 from .models import Entry
-from .schemas import DeleteResponse, EntryDetail, EntryPayload, SearchResponse
+from .schemas import CsvImportPayload, CsvImportResponse, DeleteResponse, EntryDetail, EntryPayload, SearchResponse
 from .services import (
     break_links_to_entry,
     create_entry,
     EntryConflictError,
+    EntryImportError,
+    import_entries_csv,
     rebuild_all_links,
     search_entries,
     serialize_entry,
+    serialize_entries_csv,
     update_entry,
 )
 from .test_support import reset_test_database
@@ -47,6 +50,30 @@ def healthcheck() -> dict[str, str]:
 @app.get("/api/entries/search", response_model=SearchResponse)
 def search(q: str = Query(default=""), session: Session = Depends(get_session)) -> SearchResponse:
     return SearchResponse(items=search_entries(session, q))
+
+
+@app.get("/api/entries/export.csv")
+def export_entries(session: Session = Depends(get_session)) -> Response:
+    csv_content = serialize_entries_csv(session)
+    return Response(
+        content=csv_content,
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": 'attachment; filename="etymae-entries.csv"'},
+    )
+
+
+@app.post("/api/entries/import.csv", response_model=CsvImportResponse)
+def import_entries(payload: CsvImportPayload, session: Session = Depends(get_session)) -> CsvImportResponse:
+    try:
+        imported_count = import_entries_csv(session, payload.csv_text)
+    except EntryImportError as exc:
+        session.rollback()
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except EntryConflictError as exc:
+        session.rollback()
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    return CsvImportResponse(ok=True, imported_count=imported_count)
 
 
 @app.get("/api/entries/{entry_id}", response_model=EntryDetail)

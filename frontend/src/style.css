@@ -70,8 +70,10 @@ button:disabled {
 
 .topbar-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 10px;
   align-items: center;
+  justify-content: flex-end;
 }
 
 .search-input,
@@ -92,6 +94,8 @@ button:disabled {
   right: 0;
   display: grid;
   gap: 6px;
+  max-height: 50vh;
+  overflow-y: auto;
   padding: 8px;
   border: 1px solid rgba(84, 66, 48, 0.15);
   border-radius: 14px;
@@ -147,6 +151,50 @@ button:disabled {
   border: 1px solid #fecdca;
 }
 
+.success-banner {
+  margin-top: 14px;
+  padding: 12px 14px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border-radius: 14px;
+  background: #ecfdf3;
+  color: #027a48;
+  border: 1px solid #abefc6;
+}
+
+.banner-dismiss {
+  width: 28px;
+  height: 28px;
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 1px solid #abefc6;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.66);
+  color: inherit;
+}
+
+.banner-dismiss svg {
+  width: 14px;
+  height: 14px;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
 .empty-state,
 .card,
 .modal-card,
@@ -161,6 +209,11 @@ button:disabled {
   margin-top: 22px;
   padding: 34px;
   text-align: center;
+}
+
+.success-banner + .empty-state,
+.success-banner + .board-wrap {
+  margin-top: 12px;
 }
 
 .empty-state h1,

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import csv
+import io
 import re
 from typing import Iterable
 
@@ -12,6 +14,20 @@ from .schemas import EntryDetail, EntryPayload, EntryRef, SearchResult, Unresolv
 
 class EntryConflictError(Exception):
     pass
+
+
+class EntryImportError(Exception):
+    pass
+
+
+CSV_HEADERS = (
+    "id",
+    "spelling",
+    "language",
+    "meaning",
+    "aliases_raw",
+    "upstream_raw",
+)
 
 
 def split_csv_text(raw: str) -> list[str]:
@@ -105,6 +121,35 @@ def validate_upstream_conflicts(
                 f"上游关联“{label}”匹配到多个语言归属（{'、'.join(languages)}），无法成功设置；"
                 "请改用“spelling [语言]”格式。"
             )
+
+
+def validate_upstream_conflicts_for_entries(entries: Iterable[Entry]) -> None:
+    all_entries = list(entries)
+
+    for entry in all_entries:
+        self_identifiers = entry_identifiers(entry)
+        normalized_language = entry_language(entry)
+
+        for label in split_csv_text(entry.upstream_raw):
+            spelling_label, language_label = parse_link_label(label)
+            normalized_label = normalize_label(spelling_label)
+            if not normalized_label:
+                continue
+
+            if normalized_label in self_identifiers and (
+                language_label is None or language_label == normalized_language
+            ):
+                raise EntryConflictError(
+                    f"上游关联“{label}”与词条“{describe_entry(entry)}”自身重叠，不能将词条设置为自己的上游。"
+                )
+
+            matches = find_matching_entries(all_entries, label, source_entry_id=entry.id)
+            if language_label is None and len(matches) > 1:
+                languages = sorted({match.language.strip() or "未标注" for match in matches})
+                raise EntryConflictError(
+                    f"词条“{describe_entry(entry)}”的上游关联“{label}”匹配到多个语言归属（{'、'.join(languages)}），"
+                    "无法成功导入；请改用“spelling [语言]”格式。"
+                )
 
 
 def validate_entry_conflicts(
@@ -366,3 +411,97 @@ def update_entry(session: Session, entry: Entry, payload: EntryPayload) -> Entry
     session.commit()
     session.refresh(entry)
     return entry
+
+
+def serialize_entries_csv(session: Session) -> str:
+    output = io.StringIO(newline="")
+    writer = csv.DictWriter(output, fieldnames=CSV_HEADERS)
+    writer.writeheader()
+
+    entries = session.scalars(select(Entry).order_by(Entry.id.asc())).all()
+    for entry in entries:
+        writer.writerow(
+            {
+                "id": entry.id,
+                "spelling": entry.spelling,
+                "language": entry.language,
+                "meaning": entry.meaning,
+                "aliases_raw": entry.aliases_raw,
+                "upstream_raw": entry.upstream_raw,
+            }
+        )
+
+    return output.getvalue()
+
+
+def parse_optional_int(raw_value: str | None, row_number: int, field_name: str) -> int | None:
+    value = (raw_value or "").strip()
+    if not value:
+        return None
+
+    try:
+        parsed = int(value)
+    except ValueError as exc:
+        raise EntryImportError(f"第 {row_number} 行的 {field_name} 不是有效整数。") from exc
+
+    if parsed <= 0:
+        raise EntryImportError(f"第 {row_number} 行的 {field_name} 必须大于 0。")
+
+    return parsed
+
+
+def import_entries_csv(session: Session, csv_text: str) -> int:
+    reader = csv.DictReader(io.StringIO(csv_text, newline=""))
+    if reader.fieldnames is None:
+        raise EntryImportError("CSV 缺少表头。")
+
+    missing_headers = [header for header in CSV_HEADERS if header not in reader.fieldnames]
+    if missing_headers:
+        raise EntryImportError(f"CSV 缺少列：{'、'.join(missing_headers)}。")
+
+    imported_rows: list[tuple[int | None, EntryPayload]] = []
+    seen_ids: set[int] = set()
+    for row_number, row in enumerate(reader, start=2):
+        if not any((value or "").strip() for value in row.values()):
+            continue
+
+        entry_id = parse_optional_int(row.get("id"), row_number, "id")
+        if entry_id is not None and entry_id in seen_ids:
+            raise EntryImportError(f"第 {row_number} 行的 id 与前文重复。")
+        if entry_id is not None:
+            seen_ids.add(entry_id)
+
+        try:
+            payload = EntryPayload(
+                spelling=(row.get("spelling") or "").strip(),
+                language=(row.get("language") or "").strip(),
+                meaning=(row.get("meaning") or "").strip(),
+                aliases_raw=(row.get("aliases_raw") or "").strip(),
+                upstream_raw=(row.get("upstream_raw") or "").strip(),
+            )
+        except Exception as exc:
+            raise EntryImportError(f"第 {row_number} 行的数据不合法：{exc}") from exc
+
+        imported_rows.append((entry_id, payload))
+
+    session.query(EntryLink).delete()
+    session.query(Entry).delete()
+    session.flush()
+
+    for entry_id, payload in imported_rows:
+        validate_entry_conflicts(session, payload)
+        entry = Entry(
+            id=entry_id,
+            spelling=payload.spelling.strip(),
+            language=payload.language.strip(),
+            meaning=payload.meaning.strip(),
+            aliases_raw=payload.aliases_raw.strip(),
+            upstream_raw=payload.upstream_raw.strip(),
+        )
+        session.add(entry)
+        session.flush()
+
+    validate_upstream_conflicts_for_entries(load_all_entries(session))
+    rebuild_all_links(session)
+    session.commit()
+    return len(imported_rows)

@@ -13,6 +13,10 @@ class EntryPayload(BaseModel):
     upstream_raw: str = Field(default="")
 
 
+class CsvImportPayload(BaseModel):
+    csv_text: str = Field(default="")
+
+
 class SearchResult(BaseModel):
     id: int
     spelling: str
@@ -52,3 +56,8 @@ class SearchResponse(BaseModel):
 
 class DeleteResponse(BaseModel):
     ok: bool
+
+
+class CsvImportResponse(BaseModel):
+    ok: bool
+    imported_count: int
