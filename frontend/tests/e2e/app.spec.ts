@@ -115,3 +115,29 @@ test('deletes a card and keeps dependent links as unresolved labels', async ({ p
   await expect(motherCard).toBeVisible();
   await expect(motherCard.getByText('mere [French]')).toBeVisible();
 });
+
+test('matches Greek and accented text with plain Roman search queries', async ({ page }) => {
+  await page.getByRole('button', { name: '新增卡片' }).click();
+
+  await page.getByLabel('拼写').fill('λόγος');
+  await page.getByLabel('语言归属').fill('Grḗk');
+  await page.getByLabel('含义描述').fill('βίος with café notes');
+  await page.getByLabel('别名').fill('mère');
+  await page.getByRole('button', { name: '保存' }).click();
+
+  await openCardFromSearch(page, 'logos', 6);
+  await expect(cardById(page, 6)).toBeVisible();
+
+  const search = page.getByLabel('Search entries');
+  await search.fill('mere');
+  await expect(page.getByTestId('search-result-6')).toBeVisible();
+
+  await search.fill('grek');
+  await expect(page.getByTestId('search-result-6')).toBeVisible();
+
+  await search.fill('bios');
+  await expect(page.getByTestId('search-result-6')).toBeVisible();
+
+  await search.fill('cafe');
+  await expect(page.getByTestId('search-result-6')).toBeVisible();
+});

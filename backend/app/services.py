@@ -3,9 +3,10 @@ from __future__ import annotations
 import csv
 import io
 import re
+import unicodedata
 from typing import Iterable
 
-from sqlalchemy import Select, or_, select
+from sqlalchemy import Select, select
 from sqlalchemy.orm import Session, joinedload
 
 from .models import Entry, EntryLink
@@ -29,6 +30,36 @@ CSV_HEADERS = (
     "upstream_raw",
 )
 
+GREEK_TO_LATIN = str.maketrans(
+    {
+        "α": "a",
+        "β": "b",
+        "γ": "g",
+        "δ": "d",
+        "ε": "e",
+        "ζ": "z",
+        "η": "e",
+        "θ": "th",
+        "ι": "i",
+        "κ": "k",
+        "λ": "l",
+        "μ": "m",
+        "ν": "n",
+        "ξ": "x",
+        "ο": "o",
+        "π": "p",
+        "ρ": "r",
+        "σ": "s",
+        "ς": "s",
+        "τ": "t",
+        "υ": "u",
+        "φ": "ph",
+        "χ": "ch",
+        "ψ": "ps",
+        "ω": "o",
+    }
+)
+
 
 def split_csv_text(raw: str) -> list[str]:
     normalized = raw.replace("\n", ",")
@@ -41,6 +72,13 @@ def normalize_language(value: str) -> str:
 
 def normalize_label(value: str) -> str:
     return re.sub(r"[\s\-]+", " ", value.strip().casefold()).strip()
+
+
+def normalize_search_text(value: str) -> str:
+    decomposed = unicodedata.normalize("NFKD", value.casefold())
+    stripped = "".join(character for character in decomposed if not unicodedata.combining(character))
+    transliterated = stripped.translate(GREEK_TO_LATIN)
+    return " ".join(transliterated.split())
 
 
 def parse_link_label(raw: str) -> tuple[str, str | None]:
@@ -276,20 +314,11 @@ def search_entries(session: Session, query: str) -> list[SearchResult]:
     if not trimmed:
         return []
 
-    pattern = f"%{trimmed}%"
-    statement: Select[tuple[Entry]] = (
-        select(Entry)
-        .where(
-            or_(
-                Entry.spelling.ilike(pattern),
-                Entry.language.ilike(pattern),
-                Entry.meaning.ilike(pattern),
-                Entry.aliases_raw.ilike(pattern),
-            )
-        )
-        .order_by(Entry.spelling.asc())
-        .limit(12)
-    )
+    normalized_query = normalize_search_text(trimmed)
+    if not normalized_query:
+        return []
+
+    statement: Select[tuple[Entry]] = select(Entry).order_by(Entry.spelling.asc())
     entries = session.scalars(statement).all()
     return [
         SearchResult(
@@ -300,7 +329,11 @@ def search_entries(session: Session, query: str) -> list[SearchResult]:
             meaning_preview=entry.meaning[:120],
         )
         for entry in entries
-    ]
+        if normalized_query
+        in normalize_search_text(
+            " ".join((entry.spelling, entry.language, entry.meaning, entry.aliases_raw))
+        )
+    ][:12]
 
 
 def serialize_entry(session: Session, entry_id: int) -> EntryDetail | None:
