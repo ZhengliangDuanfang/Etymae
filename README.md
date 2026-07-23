@@ -4,6 +4,29 @@
 
 ## 启动方式
 
+### Windows 一键启动
+
+项目根目录提供了 `start-windows.bat`。
+
+- 直接双击这个文件，会分别打开后端和前端两个命令行窗口
+- 脚本会自动检查 `.venv`、`frontend/node_modules` 和 `npm` 是否存在
+- 成功启动后会自动打开 `http://127.0.0.1:22026`
+
+如果想在 Git Bash 里执行，也可以在项目根目录运行：
+
+```bash
+./start-windows.bat
+```
+
+首次使用前，仍需先完成依赖安装：
+
+```bash
+python -m venv .venv
+.venv/Scripts/pip install -r backend/requirements.txt
+cd frontend
+npm install
+```
+
 ### 后端
 
 ```bash

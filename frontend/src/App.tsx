@@ -63,6 +63,8 @@ type CsvImportResponse = {
   imported_count: number;
 };
 
+type ViewMode = 'card' | 'column';
+
 type IconButtonProps = {
   label: string;
   onClick: () => void;
@@ -76,7 +78,7 @@ type CardNodeData = {
   onHide: (id: number) => void;
   onEdit: (entry: EntryDetail) => void;
   onDelete: (entry: EntryDetail) => void;
-  onOpen: (id: number) => void;
+  onOpen: (id: number, sourceId?: number, relation?: 'upstream' | 'downstream', relationIndex?: number, relationCount?: number) => void;
   onMeasure: (id: number, height: number) => void;
 };
 
@@ -88,6 +90,37 @@ const HORIZONTAL_GAP = 170;
 const VERTICAL_GAP = 36;
 const BOARD_PADDING_X = 72;
 const BOARD_PADDING_Y = 56;
+const LINK_STACK_GAP = 88;
+
+function buildLinkedCardPosition(
+  source: AppNode,
+  relation: 'upstream' | 'downstream',
+  relationIndex = 0,
+  relationCount = 1,
+) {
+  const sourceWidth = source.measured?.width ?? CARD_WIDTH;
+  const sourceHeight = source.measured?.height ?? CARD_MIN_HEIGHT;
+  const centeredIndex = relationIndex - (relationCount - 1) / 2;
+  const horizontalLayout = source.data.handleLayout === 'horizontal';
+
+  if (horizontalLayout) {
+    const direction = relation === 'upstream' ? -1 : 1;
+    const yOffset = centeredIndex * LINK_STACK_GAP;
+
+    return {
+      x: source.position.x + direction * (sourceWidth + HORIZONTAL_GAP),
+      y: source.position.y + sourceHeight / 2 - CARD_MIN_HEIGHT / 2 + yOffset,
+    };
+  }
+
+  const direction = relation === 'upstream' ? -1 : 1;
+  const xOffset = centeredIndex * LINK_STACK_GAP;
+
+  return {
+    x: source.position.x + sourceWidth / 2 - CARD_WIDTH / 2 + xOffset,
+    y: source.position.y + direction * (sourceHeight + VERTICAL_GAP),
+  };
+}
 
 const EMPTY_FORM: EntryPayload = {
   spelling: '',
@@ -411,7 +444,7 @@ function CardNode({ data }: NodeProps<AppNode>) {
       <section className="relation-section">
         <div className="relation-label">上游</div>
         <div className="link-row nodrag nopan">
-          {data.entry.upstream_resolved.map((link) => (
+          {data.entry.upstream_resolved.map((link, index) => (
             <button
               key={`${data.entry.id}-up-${link.id}`}
               type="button"
@@ -419,7 +452,7 @@ function CardNode({ data }: NodeProps<AppNode>) {
               data-testid={`upstream-link-${data.entry.id}-${link.id}`}
               onClick={(event) => {
                 event.stopPropagation();
-                data.onOpen(link.id);
+                data.onOpen(link.id, data.entry.id, 'upstream', index, data.entry.upstream_resolved.length);
               }}
             >
               {link.spelling}
@@ -441,7 +474,7 @@ function CardNode({ data }: NodeProps<AppNode>) {
       <section className="relation-section relation-section-secondary">
         <div className="relation-label">下游</div>
         <div className="link-row nodrag nopan">
-          {data.entry.downstream.map((link) => (
+          {data.entry.downstream.map((link, index) => (
             <button
               key={`${data.entry.id}-down-${link.id}`}
               type="button"
@@ -449,7 +482,7 @@ function CardNode({ data }: NodeProps<AppNode>) {
               data-testid={`downstream-link-${data.entry.id}-${link.id}`}
               onClick={(event) => {
                 event.stopPropagation();
-                data.onOpen(link.id);
+                data.onOpen(link.id, data.entry.id, 'downstream', index, data.entry.downstream.length);
               }}
             >
               {link.spelling}
@@ -475,7 +508,10 @@ function App() {
   const [results, setResults] = useState<SearchItem[]>([]);
   const [cardIds, setCardIds] = useState<number[]>([]);
   const [cardsById, setCardsById] = useState<Record<number, EntryDetail>>({});
+  const [viewMode, setViewMode] = useState<ViewMode>('card');
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
+  const [detailEntryId, setDetailEntryId] = useState<number | null>(null);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [formState, setFormState] = useState<EntryPayload>(EMPTY_FORM);
   const [formError, setFormError] = useState<string | null>(null);
@@ -489,12 +525,18 @@ function App() {
   const [handleLayout, setHandleLayout] = useState<'horizontal' | 'vertical'>('horizontal');
   const importInputRef = useRef<HTMLInputElement | null>(null);
   const cardIdsRef = useRef<number[]>([]);
+  const nodesRef = useRef<AppNode[]>([]);
   const nextZIndexRef = useRef(1);
   const pendingZIndexesRef = useRef<Record<number, number>>({});
+  const pendingPositionsRef = useRef<Record<number, { x: number; y: number }>>({});
 
   useEffect(() => {
     cardIdsRef.current = cardIds;
   }, [cardIds]);
+
+  useEffect(() => {
+    nodesRef.current = nodes;
+  }, [nodes]);
 
   useEffect(() => {
     const trimmed = query.trim();
@@ -519,6 +561,8 @@ function App() {
     () => cardIds.map((id) => cardsById[id]).filter((card): card is EntryDetail => Boolean(card)),
     [cardIds, cardsById],
   );
+
+  const detailEntry = detailEntryId === null ? null : cardsById[detailEntryId] ?? null;
 
   const edges = useMemo(() => {
     const visibleIds = new Set(cards.map((entry) => entry.id));
@@ -557,12 +601,20 @@ function App() {
   useEffect(() => {
     setNodes((current) => {
       const currentById = new Map(current.map((node) => [Number(node.id), node]));
-      const nextPositions = avoidOccupiedPositions(
-        cards,
-        buildFloatingPositions(cards, cardIds, nodeHeights),
-        nodeHeights,
-        currentById,
-      );
+      const basePositions = buildFloatingPositions(cards, cardIds, nodeHeights);
+
+      for (const entry of cards) {
+        if (currentById.has(entry.id)) {
+          continue;
+        }
+
+        const pendingPosition = pendingPositionsRef.current[entry.id];
+        if (pendingPosition) {
+          basePositions.set(entry.id, pendingPosition);
+        }
+      }
+
+      const nextPositions = avoidOccupiedPositions(cards, basePositions, nodeHeights, currentById);
       const nextNodes = cards.map((entry) => {
         const existing = currentById.get(entry.id);
         return {
@@ -608,7 +660,21 @@ function App() {
     });
   }
 
-  async function loadCard(id: number) {
+  async function loadCard(
+    id: number,
+    sourceId?: number,
+    relation?: 'upstream' | 'downstream',
+    relationIndex?: number,
+    relationCount?: number,
+  ) {
+    const alreadyVisible = cardIdsRef.current.includes(id);
+    if (!alreadyVisible && sourceId !== undefined && relation) {
+      const sourceNode = nodesRef.current.find((node) => Number(node.id) === sourceId);
+      if (sourceNode) {
+        pendingPositionsRef.current[id] = buildLinkedCardPosition(sourceNode, relation, relationIndex, relationCount);
+      }
+    }
+
     const entry = await api<EntryDetail>(`/api/entries/${id}`);
     setCardsById((current) => ({ ...current, [id]: entry }));
     setCardIds((current) => (current.includes(id) ? current : [...current, id]));
@@ -631,8 +697,14 @@ function App() {
     });
   }
 
-  function handleSelectCard(id: number) {
-    loadCard(id).catch((requestError) => {
+  function handleSelectCard(
+    id: number,
+    sourceId?: number,
+    relation?: 'upstream' | 'downstream',
+    relationIndex?: number,
+    relationCount?: number,
+  ) {
+    loadCard(id, sourceId, relation, relationIndex, relationCount).catch((requestError) => {
       setError(requestError instanceof Error ? requestError.message : 'Failed to add card');
     });
     setQuery('');
@@ -655,6 +727,14 @@ function App() {
     setModalOpen(true);
   }
 
+  function toggleHandleLayout() {
+    setHandleLayout((current) => (current === 'horizontal' ? 'vertical' : 'horizontal'));
+  }
+
+  function toggleViewMode() {
+    setViewMode((current) => (current === 'card' ? 'column' : 'card'));
+  }
+
   function resetBoardState() {
     setCardIds([]);
     setCardsById({});
@@ -664,17 +744,21 @@ function App() {
     setResults([]);
     setQuery('');
     setModalOpen(false);
+    setDetailEntryId(null);
     setEditingId(null);
     setFormState(EMPTY_FORM);
     setFormError(null);
     nextZIndexRef.current = 1;
     pendingZIndexesRef.current = {};
+    pendingPositionsRef.current = {};
   }
 
   function hideCard(id: number) {
     setCardIds((current) => current.filter((cardId) => cardId !== id));
     setNodes((current) => current.filter((node) => Number(node.id) !== id));
+    setDetailEntryId((current) => (current === id ? null : current));
     delete pendingZIndexesRef.current[id];
+    delete pendingPositionsRef.current[id];
   }
 
   function openEditModal(entry: EntryDetail) {
@@ -737,6 +821,7 @@ function App() {
         return next;
       });
       delete pendingZIndexesRef.current[deleteTarget.id];
+      delete pendingPositionsRef.current[deleteTarget.id];
       const remainingIds = cardIdsRef.current.filter((id) => id !== deleteTarget.id);
       setCardIds(remainingIds);
       setDeleteTarget(null);
@@ -844,18 +929,11 @@ function App() {
             className="visually-hidden"
             onChange={handleImportFile}
           />
-          <button type="button" className="text-button" onClick={handleExportCsv} disabled={csvBusy}>
-            导出 CSV
+          <button type="button" className="text-button" onClick={() => setSettingsOpen(true)}>
+            设置
           </button>
-          <button type="button" className="text-button" onClick={openImportPicker} disabled={csvBusy}>
-            导入覆盖
-          </button>
-          <button
-            type="button"
-            className="text-button"
-            onClick={() => setHandleLayout((current) => (current === 'horizontal' ? 'vertical' : 'horizontal'))}
-          >
-            {handleLayout === 'horizontal' ? '连接点: 左右' : '连接点: 上下'}
+          <button type="button" className="text-button" onClick={toggleViewMode}>
+            {viewMode === 'card' ? '栏目模式' : '卡片模式'}
           </button>
           <button type="button" className="primary-button" onClick={openCreateModal}>
             新增卡片
@@ -880,7 +958,7 @@ function App() {
           <h1>词源卡片板</h1>
           <p>从顶部搜索栏加入词条，卡片会以漂浮节点的形式出现在画布中，并保持上下游箭头连接。</p>
         </section>
-      ) : (
+      ) : viewMode === 'card' ? (
         <section className="board-wrap">
           <div className="board-canvas">
             <ReactFlow
@@ -906,7 +984,111 @@ function App() {
             </ReactFlow>
           </div>
         </section>
+      ) : (
+        <section className="board-wrap">
+          <div className="board-columns" data-testid="column-view">
+            {cards.map((entry) => (
+              <article key={entry.id} className="column-item" data-testid={`column-item-${entry.id}`}>
+                <div className="column-item-main">
+                  <h2>{entry.spelling}</h2>
+                  {entry.language ? <span className="column-item-language">{entry.language}</span> : null}
+                </div>
+                <div className="card-actions">
+                  <IconButton label="查看详情" onClick={() => setDetailEntryId(entry.id)}>
+                    <svg viewBox="0 0 16 16" aria-hidden="true">
+                      <circle cx="8" cy="8" r="5.5" fill="none" stroke="currentColor" strokeWidth="1.2" />
+                      <path d="M8 7.2v3.1" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
+                      <circle cx="8" cy="4.8" r="0.8" fill="currentColor" />
+                    </svg>
+                  </IconButton>
+                  <IconButton label="隐藏卡片" onClick={() => hideCard(entry.id)}>
+                    <svg viewBox="0 0 16 16" aria-hidden="true">
+                      <path d="M1.5 8s2.5-4 6.5-4 6.5 4 6.5 4-2.5 4-6.5 4-6.5-4-6.5-4Z" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round" />
+                      <path d="M6 6 10 10M10 6 6 10" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
+                    </svg>
+                  </IconButton>
+                  <IconButton label="修改卡片" onClick={() => openEditModal(entry)}>
+                    <svg viewBox="0 0 16 16" aria-hidden="true">
+                      <path d="M3 11.8 11.9 3l1.1 1.1L4.1 13H3z" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round" />
+                      <path d="M10.8 4.1 12 2.9a1.2 1.2 0 0 1 1.7 0l.4.4a1.2 1.2 0 0 1 0 1.7l-1.2 1.2" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+                    </svg>
+                  </IconButton>
+                </div>
+              </article>
+            ))}
+          </div>
+        </section>
       )}
+
+      {detailEntry ? (
+        <div className="modal-backdrop" role="presentation">
+          <div className="modal-card detail-card">
+            <div className="modal-header">
+              <div className="detail-title-block">
+                <h2>{detailEntry.spelling}</h2>
+                {detailEntry.language ? <span className="column-item-language">{detailEntry.language}</span> : null}
+              </div>
+              <button type="button" className="text-button" onClick={() => setDetailEntryId(null)}>
+                关闭
+              </button>
+            </div>
+
+            <div className="detail-content">
+              <section className="detail-section">
+                <div className="relation-label">释义</div>
+                <p className="meaning">{detailEntry.meaning || '暂无描述'}</p>
+              </section>
+
+              <section className="detail-section">
+                <div className="relation-label">上游</div>
+                <div className="link-row">
+                  {detailEntry.upstream_resolved.map((link, index) => (
+                    <button
+                      key={`${detailEntry.id}-detail-up-${link.id}`}
+                      type="button"
+                      className="link-pill"
+                      onClick={() => {
+                        void loadCard(link.id, detailEntry.id, 'upstream', index, detailEntry.upstream_resolved.length).catch((requestError) => {
+                          setError(requestError instanceof Error ? requestError.message : 'Failed to add card');
+                        });
+                      }}
+                    >
+                      {link.spelling}
+                    </button>
+                  ))}
+                  {detailEntry.upstream_unresolved.map((link) => (
+                    <span key={`${detailEntry.id}-detail-missing-${link.label}`} className="link-pill unresolved-link">
+                      {link.label}
+                    </span>
+                  ))}
+                  {detailEntry.upstream_resolved.length === 0 && detailEntry.upstream_unresolved.length === 0 ? <span className="muted">无上游关联</span> : null}
+                </div>
+              </section>
+
+              <section className="detail-section">
+                <div className="relation-label">下游</div>
+                <div className="link-row">
+                  {detailEntry.downstream.map((link, index) => (
+                    <button
+                      key={`${detailEntry.id}-detail-down-${link.id}`}
+                      type="button"
+                      className="link-pill"
+                      onClick={() => {
+                        void loadCard(link.id, detailEntry.id, 'downstream', index, detailEntry.downstream.length).catch((requestError) => {
+                          setError(requestError instanceof Error ? requestError.message : 'Failed to add card');
+                        });
+                      }}
+                    >
+                      {link.spelling}
+                    </button>
+                  ))}
+                  {detailEntry.downstream.length === 0 ? <span className="muted">无下游关联</span> : null}
+                </div>
+              </section>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       {modalOpen ? (
         <div className="modal-backdrop" role="presentation">
@@ -993,6 +1175,31 @@ function App() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      ) : null}
+
+      {settingsOpen ? (
+        <div className="modal-backdrop" role="presentation">
+          <div className="modal-card settings-card">
+            <div className="modal-header">
+              <h2>设置</h2>
+              <button type="button" className="text-button" onClick={() => setSettingsOpen(false)}>
+                关闭
+              </button>
+            </div>
+
+            <div className="settings-actions">
+              <button type="button" className="text-button" onClick={handleExportCsv} disabled={csvBusy}>
+                导出 CSV
+              </button>
+              <button type="button" className="text-button" onClick={openImportPicker} disabled={csvBusy}>
+                导入覆盖
+              </button>
+              <button type="button" className="text-button" onClick={toggleHandleLayout}>
+                {handleLayout === 'horizontal' ? '连接点: 左右' : '连接点: 上下'}
+              </button>
+            </div>
           </div>
         </div>
       ) : null}

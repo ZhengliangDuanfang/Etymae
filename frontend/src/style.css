@@ -230,6 +230,45 @@ button:disabled {
   gap: 12px;
 }
 
+.board-columns {
+  columns: 320px;
+  column-gap: 16px;
+}
+
+.column-item {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 0 0 16px;
+  padding: 14px 16px;
+  break-inside: avoid;
+  border: 1px solid rgba(84, 66, 48, 0.15);
+  border-radius: 18px;
+  background: rgba(255, 252, 246, 0.96);
+  box-shadow: 0 10px 24px rgba(84, 66, 48, 0.08);
+}
+
+.column-item-main {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.column-item h2 {
+  margin: 0;
+  font-size: 1.02rem;
+  line-height: 1.25;
+  color: #2e241b;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.column-item-language {
+  color: #6b7280;
+}
+
 .board-canvas {
   position: relative;
   height: min(78vh, 920px);
@@ -423,6 +462,27 @@ button:disabled {
   padding: 22px;
 }
 
+.detail-card {
+  width: min(680px, 100%);
+}
+
+.detail-title-block {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.detail-content {
+  display: grid;
+  gap: 16px;
+  margin-top: 18px;
+}
+
+.detail-section {
+  display: grid;
+  gap: 8px;
+}
+
 .modal-header,
 .form-actions {
   display: flex;
@@ -435,6 +495,20 @@ button:disabled {
   display: grid;
   gap: 14px;
   margin-top: 18px;
+}
+
+.settings-card {
+  width: min(420px, 100%);
+}
+
+.settings-actions {
+  display: grid;
+  gap: 12px;
+  margin-top: 18px;
+}
+
+.settings-actions .text-button {
+  width: 100%;
 }
 
 .entry-form label {
@@ -469,6 +543,14 @@ button:disabled {
   .board-canvas {
     min-height: 72vh;
     height: 72vh;
+  }
+
+  .board-columns {
+    columns: 1;
+  }
+
+  .column-item {
+    align-items: flex-start;
   }
 
   .card {
