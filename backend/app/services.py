@@ -337,7 +337,7 @@ def search_entries(session: Session, query: str) -> list[SearchResult]:
         in normalize_search_text(
             " ".join((entry.spelling, entry.language, entry.meaning, entry.aliases_raw))
         )
-    ][:12]
+    ]
 
 
 def serialize_entry(session: Session, entry_id: int) -> EntryDetail | None:

@@ -1025,7 +1025,10 @@ function App() {
           <div className="modal-card detail-card">
             <div className="modal-header">
               <div className="detail-title-block">
-                <h2>{detailEntry.spelling}</h2>
+                <div className="detail-title-row">
+                  <h2>{detailEntry.spelling}</h2>
+                  <span className="detail-title-tag">{detailEntry.aliases_raw}</span>
+                </div>
                 {detailEntry.language ? <span className="column-item-language">{detailEntry.language}</span> : null}
               </div>
               <button type="button" className="text-button" onClick={() => setDetailEntryId(null)}>
