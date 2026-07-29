@@ -100,66 +100,18 @@ test.beforeEach(async ({ page, request }) => {
   await page.goto('/');
 });
 
-test('shows a prompt when creating a card whose alias conflicts with an existing spelling in the same language', async ({ page }) => {
+test('shows a prompt when creating a card with internal alias conflicts', async ({ page }) => {
   await expectCreateConflict(
     page,
     {
-      spelling: 'caretaker',
+      spelling: 'seabird',
       language: 'English',
-      meaning: 'temporary record for conflict testing',
-      aliases_raw: 'mother',
+      meaning: 'self alias conflict case',
+      aliases_raw: 'sea-bird, sea bird',
       upstream_raw: '',
     },
-    '别名“mother”与现有词条“mother [English]”冲突：同一语言归属下，拼写和所有别名的组合必须唯一。',
+    '当前词条内存在冲突：别名“sea bird”与别名“sea-bird”在语言归属“English”下重复。',
   );
-});
-
-test('shows prompts when creating a card with multiple-alias, single-alias, and self-alias conflicts', async ({ page }) => {
-  await test.step('multiple aliases include an existing alias conflict', async () => {
-    await expectCreateConflict(
-      page,
-      {
-        spelling: 'caretaker',
-        language: 'English',
-        meaning: 'multiple alias conflict case',
-        aliases_raw: 'guardian, mum',
-        upstream_raw: '',
-      },
-      '别名“mum”与现有词条“mother [English]”冲突：同一语言归属下，拼写和所有别名的组合必须唯一。',
-    );
-  });
-
-  await page.reload();
-
-  await test.step('single alias conflicts with an existing alias', async () => {
-    await expectCreateConflict(
-      page,
-      {
-        spelling: 'carer',
-        language: 'English',
-        meaning: 'single alias conflict case',
-        aliases_raw: 'mom',
-        upstream_raw: '',
-      },
-      '别名“mom”与现有词条“mother [English]”冲突：同一语言归属下，拼写和所有别名的组合必须唯一。',
-    );
-  });
-
-  await page.reload();
-
-  await test.step('aliases conflict with each other after normalization', async () => {
-    await expectCreateConflict(
-      page,
-      {
-        spelling: 'seabird',
-        language: 'English',
-        meaning: 'self alias conflict case',
-        aliases_raw: 'sea-bird, sea bird',
-        upstream_raw: '',
-      },
-      '当前词条内存在冲突：别名“sea bird”与别名“sea-bird”在语言归属“English”下重复。',
-    );
-  });
 });
 
 test('does not show a prompt when creating a card whose alias only overlaps across languages', async ({ page }) => {
@@ -221,6 +173,22 @@ test('shows prompts when creating a card whose upstream overlaps itself or acros
 
   await page.reload();
 
+  await test.step('upstream labels that resolve to the same entry are rejected', async () => {
+    await expectCreateConflict(
+      page,
+      {
+        spelling: 'descendant-dup',
+        language: 'English',
+        meaning: 'duplicate upstream labels',
+        aliases_raw: '',
+        upstream_raw: 'mother, mother [English]',
+      },
+      '当前词条内存在冲突：上游关联“mother [English]”与上游关联“mother”重复，都指向词条“mother [English]”。',
+    );
+  });
+
+  await page.reload();
+
   await test.step('upstream matches multiple languages without specifying the language', async () => {
     await createEntry(request, {
       spelling: 'mother',
@@ -244,76 +212,6 @@ test('shows prompts when creating a card whose upstream overlaps itself or acros
   });
 });
 
-test('shows a prompt when editing a card whose alias conflicts with an existing spelling in the same language', async ({ page }) => {
-  await expectEditConflict(
-    page,
-    'orphan',
-    5,
-    {
-      spelling: 'orphan',
-      language: 'English',
-      meaning: 'entry with an unresolved upstream',
-      aliases_raw: 'mother',
-      upstream_raw: 'missing-root [PIE]',
-    },
-    '别名“mother”与现有词条“mother [English]”冲突：同一语言归属下，拼写和所有别名的组合必须唯一。',
-  );
-});
-
-test('shows prompts when editing a card with multiple-alias, single-alias, and self-alias conflicts', async ({ page }) => {
-  await test.step('multiple aliases include an existing alias conflict', async () => {
-    await expectEditConflict(
-      page,
-      'orphan',
-      5,
-      {
-        spelling: 'orphan',
-        language: 'English',
-        meaning: 'entry with an unresolved upstream',
-        aliases_raw: 'guardian, mum',
-        upstream_raw: 'missing-root [PIE]',
-      },
-      '别名“mum”与现有词条“mother [English]”冲突：同一语言归属下，拼写和所有别名的组合必须唯一。',
-    );
-  });
-
-  await page.reload();
-
-  await test.step('single alias conflicts with an existing alias', async () => {
-    await expectEditConflict(
-      page,
-      'orphan',
-      5,
-      {
-        spelling: 'orphan',
-        language: 'English',
-        meaning: 'entry with an unresolved upstream',
-        aliases_raw: 'mom',
-        upstream_raw: 'missing-root [PIE]',
-      },
-      '别名“mom”与现有词条“mother [English]”冲突：同一语言归属下，拼写和所有别名的组合必须唯一。',
-    );
-  });
-
-  await page.reload();
-
-  await test.step('aliases conflict with each other after normalization', async () => {
-    await expectEditConflict(
-      page,
-      'orphan',
-      5,
-      {
-        spelling: 'orphan',
-        language: 'English',
-        meaning: 'entry with an unresolved upstream',
-        aliases_raw: 'sea-bird, sea bird',
-        upstream_raw: 'missing-root [PIE]',
-      },
-      '当前词条内存在冲突：别名“sea bird”与别名“sea-bird”在语言归属“English”下重复。',
-    );
-  });
-});
-
 test('does not show a prompt when editing a card whose alias only overlaps across languages', async ({ page }) => {
   const orphanCard = await expectEditSuccess(page, 'orphan', 5, {
     spelling: 'orphan',
@@ -323,6 +221,22 @@ test('does not show a prompt when editing a card whose alias only overlaps acros
     upstream_raw: 'missing-root [PIE]',
   });
   await expect(orphanCard.getByText('missing-root [PIE]')).toBeVisible();
+});
+
+test('shows a prompt when editing a card with internal alias conflicts', async ({ page }) => {
+  await expectEditConflict(
+    page,
+    'orphan',
+    5,
+    {
+      spelling: 'orphan',
+      language: 'English',
+      meaning: 'entry with an unresolved upstream',
+      aliases_raw: 'sea-bird, sea bird',
+      upstream_raw: 'missing-root [PIE]',
+    },
+    '当前词条内存在冲突：别名“sea bird”与别名“sea-bird”在语言归属“English”下重复。',
+  );
 });
 
 test('shows prompts when editing a card whose upstream overlaps itself or across languages without a language tag', async ({ page, request }) => {
@@ -362,6 +276,24 @@ test('shows prompts when editing a card whose upstream overlaps itself or across
     });
     await expect(orphanCard.getByRole('button', { name: 'mother' })).toBeVisible();
     await expect(orphanCard.getByRole('button', { name: 'caretaker-shadow' })).toBeVisible();
+  });
+
+  await page.reload();
+
+  await test.step('upstream labels that resolve to the same entry are rejected', async () => {
+    await expectEditConflict(
+      page,
+      'orphan',
+      5,
+      {
+        spelling: 'orphan',
+        language: 'English',
+        meaning: 'entry with an unresolved upstream',
+        aliases_raw: '',
+        upstream_raw: 'mother, mother [English]',
+      },
+      '当前词条内存在冲突：上游关联“mother [English]”与上游关联“mother”重复，都指向词条“mother [English]”。',
+    );
   });
 
   await page.reload();

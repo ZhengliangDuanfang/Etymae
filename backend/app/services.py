@@ -110,6 +110,28 @@ def payload_identifiers(payload: EntryPayload) -> set[str]:
     return {item for item in identifiers if item}
 
 
+def validate_payload_identifier_conflicts(payload: EntryPayload) -> None:
+    spelling = payload.spelling.strip()
+    aliases = split_csv_text(payload.aliases_raw)
+
+    candidates: list[tuple[str, str, str]] = [("拼写", spelling, normalize_label(spelling))]
+    candidates.extend(("别名", alias, normalize_label(alias)) for alias in aliases)
+
+    seen_identifiers: dict[str, tuple[str, str]] = {}
+    for field_name, raw_value, normalized_value in candidates:
+        if not normalized_value:
+            continue
+
+        existing = seen_identifiers.get(normalized_value)
+        if existing is not None:
+            raise EntryConflictError(
+                f"当前词条内存在冲突：{field_name}“{raw_value}”与{existing[0]}“{existing[1]}”在语言归属"
+                f"“{payload.language.strip() or '未标注'}”下重复。"
+            )
+
+        seen_identifiers[normalized_value] = (field_name, raw_value)
+
+
 def find_matching_entries(
     entries: Iterable[Entry],
     label: str,
@@ -140,6 +162,7 @@ def validate_upstream_conflicts(
     entries = load_all_entries(session)
     self_identifiers = payload_identifiers(payload)
     normalized_language = normalize_language(payload.language)
+    seen_target_ids: dict[int, str] = {}
 
     for label in split_csv_text(payload.upstream_raw):
         spelling_label, language_label = parse_link_label(label)
@@ -153,6 +176,15 @@ def validate_upstream_conflicts(
             )
 
         matches = find_matching_entries(entries, label, source_entry_id=current_entry_id)
+        if len(matches) == 1:
+            existing_label = seen_target_ids.get(matches[0].id)
+            if existing_label is not None:
+                raise EntryConflictError(
+                    f"当前词条内存在冲突：上游关联“{label}”与上游关联“{existing_label}”重复，"
+                    f"都指向词条“{describe_entry(matches[0])}”。"
+                )
+            seen_target_ids[matches[0].id] = label
+
         if language_label is None and len(matches) > 1:
             languages = sorted({entry.language.strip() or "未标注" for entry in matches})
             raise EntryConflictError(
@@ -167,6 +199,7 @@ def validate_upstream_conflicts_for_entries(entries: Iterable[Entry]) -> None:
     for entry in all_entries:
         self_identifiers = entry_identifiers(entry)
         normalized_language = entry_language(entry)
+        seen_target_ids: dict[int, str] = {}
 
         for label in split_csv_text(entry.upstream_raw):
             spelling_label, language_label = parse_link_label(label)
@@ -182,6 +215,15 @@ def validate_upstream_conflicts_for_entries(entries: Iterable[Entry]) -> None:
                 )
 
             matches = find_matching_entries(all_entries, label, source_entry_id=entry.id)
+            if len(matches) == 1:
+                existing_label = seen_target_ids.get(matches[0].id)
+                if existing_label is not None:
+                    raise EntryConflictError(
+                        f"词条“{describe_entry(entry)}”内存在冲突：上游关联“{label}”与上游关联"
+                        f"“{existing_label}”重复，都指向词条“{describe_entry(matches[0])}”。"
+                    )
+                seen_target_ids[matches[0].id] = label
+
             if language_label is None and len(matches) > 1:
                 languages = sorted({match.language.strip() or "未标注" for match in matches})
                 raise EntryConflictError(
@@ -195,45 +237,7 @@ def validate_entry_conflicts(
     payload: EntryPayload,
     current_entry_id: int | None = None,
 ) -> None:
-    normalized_language = normalize_language(payload.language)
-    spelling = payload.spelling.strip()
-    normalized_spelling = normalize_label(spelling)
-    aliases = split_csv_text(payload.aliases_raw)
-
-    candidates: list[tuple[str, str, str]] = [("拼写", spelling, normalized_spelling)]
-    candidates.extend(("别名", alias, normalize_label(alias)) for alias in aliases)
-
-    seen_identifiers: dict[str, tuple[str, str]] = {}
-    for field_name, raw_value, normalized_value in candidates:
-        if not normalized_value:
-            continue
-
-        existing = seen_identifiers.get(normalized_value)
-        if existing is not None:
-            raise EntryConflictError(
-                f"当前词条内存在冲突：{field_name}“{raw_value}”与{existing[0]}“{existing[1]}”在语言归属"
-                f"“{payload.language.strip() or '未标注'}”下重复。"
-            )
-
-        seen_identifiers[normalized_value] = (field_name, raw_value)
-
-    entries = load_all_entries(session)
-    for entry in entries:
-        if current_entry_id is not None and entry.id == current_entry_id:
-            continue
-        if entry_language(entry) != normalized_language:
-            continue
-
-        existing_identifiers = entry_identifiers(entry)
-        for field_name, raw_value, normalized_value in candidates:
-            if not normalized_value or normalized_value not in existing_identifiers:
-                continue
-
-            raise EntryConflictError(
-                f"{field_name}“{raw_value}”与现有词条“{describe_entry(entry)}”冲突：同一语言归属下，"
-                "拼写和所有别名的组合必须唯一。"
-            )
-
+    validate_payload_identifier_conflicts(payload)
     validate_upstream_conflicts(session, payload, current_entry_id=current_entry_id)
 
 
