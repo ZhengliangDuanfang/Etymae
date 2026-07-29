@@ -707,6 +707,9 @@ function App() {
     loadCard(id, sourceId, relation, relationIndex, relationCount).catch((requestError) => {
       setError(requestError instanceof Error ? requestError.message : 'Failed to add card');
     });
+  }
+
+  function clearSearch() {
     setQuery('');
     setResults([]);
   }
@@ -897,13 +900,20 @@ function App() {
     <div className="shell">
       <header className="topbar">
         <div className="search-panel">
-          <input
-            aria-label="Search entries"
-            className="search-input"
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            placeholder="搜索拼写、别名、语言或含义"
-          />
+          <div className="search-input-wrap">
+            <input
+              aria-label="Search entries"
+              className="search-input"
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="搜索拼写、别名、语言或含义"
+            />
+            {query.trim() ? (
+              <button type="button" className="search-clear-button" aria-label="清空搜索" onClick={clearSearch}>
+                ×
+              </button>
+            ) : null}
+          </div>
           {results.length > 0 ? (
             <div className="search-results">
               {results.map((item) => (
@@ -914,8 +924,13 @@ function App() {
                   data-testid={`search-result-${item.id}`}
                   onClick={() => handleSelectCard(item.id)}
                 >
-                  <span>{item.spelling}</span>
-                  <small>{item.language || '未标注语言'}</small>
+                  <span className="search-result-main">
+                    <span>{item.spelling}</span>
+                    <small>{item.language || '未标注语言'}</small>
+                  </span>
+                  <span className={`search-result-flag${cardIds.includes(item.id) ? ' is-visible' : ''}`} aria-hidden="true">
+                    {cardIds.includes(item.id) ? '✓' : ''}
+                  </span>
                 </button>
               ))}
             </div>
